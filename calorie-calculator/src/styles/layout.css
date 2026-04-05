@@ -1,0 +1,18 @@
+/* ═══════════════════════════════════════════════════════════════
+   30 CALZ — Layout v8 (Mobile-First)
+   ═══════════════════════════════════════════════════════════════ */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  position: relative;
+}
+
+main {
+  flex: 1;
+  overflow-x: hidden;
+}
+
+/* Hide any desktop-only elements */
+.nav-desktop-links { display: none !important; }

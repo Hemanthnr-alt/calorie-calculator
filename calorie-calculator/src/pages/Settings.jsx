@@ -1,522 +1,258 @@
-import { useEffect, useState } from 'react';
-import { apiFetch } from '../lib/api.js';
-import * as offlineStore from '../lib/offlineStore.js';
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext.jsx';
 import { useTheme, THEME_IDS } from '../context/ThemeContext.jsx';
+import { unlockAchievement, db } from '../db/database.js';
+import {
+  requestPermission, getPermissionStatus, getReminders,
+  addReminder, removeReminder, toggleReminder, DEFAULT_REMINDERS, initNotifications,
+} from '../lib/notifications.js';
 
-const ACCENT_PRESETS = [
-  { hue: 168, label: 'Teal' },
-  { hue: 200, label: 'Blue' },
-  { hue: 250, label: 'Violet' },
-  { hue: 135, label: 'Green' },
-  { hue: 22,  label: 'Amber' },
-  { hue: 340, label: 'Rose' },
+const ACTIVITIES = [
+  { id: 'sedentary', label: 'Sedentary', mult: 1.2 },
+  { id: 'light',     label: 'Light (1-3d/wk)',   mult: 1.375 },
+  { id: 'moderate',  label: 'Moderate (3-5d/wk)', mult: 1.55 },
+  { id: 'active',    label: 'Active (6-7d/wk)',   mult: 1.725 },
+  { id: 'extreme',   label: 'Very Active',         mult: 1.9 },
 ];
+const GOAL_OFFSETS = [
+  { id: 'cut',      label: 'Lose Weight (-500)',  offset: -500 },
+  { id: 'maintain', label: 'Maintain Weight',     offset: 0 },
+  { id: 'bulk',     label: 'Gain Weight (+500)',  offset: 500 },
+];
+const THEME_COLORS = {
+  dark:     ['#080810','#141422'], cosmic:   ['#07061a','#141232'],
+  ember:    ['#100806','#221812'], forest:   ['#060e08','#122118'],
+  arctic:   ['#060a10','#141e2c'], midnight: ['#05050f','#10102c'],
+  light:    ['#f4f4f8','#ececf4'],
+};
 
-export default function Settings({ token, userId, user, offline }) {
-  const { themeId, setThemeId, accentHue, setAccentHue, radius, setRadius, density, setDensity, fontScale, setFontScale } =
-    useTheme();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [passwordSaving, setPasswordSaving] = useState(false);
-  const [passwordMessage, setPasswordMessage] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [passwordForm, setPasswordForm] = useState({
-    current_password: '',
-    new_password: '',
-    confirm_password: '',
-  });
-  const [motionPreset, setMotionPreset] = useState(() => localStorage.getItem('motionPreset') || 'standard');
-  const [profile, setProfile] = useState({
-    age: '',
-    gender: 'male',
-    weight_kg: '',
-    height_cm: '',
-    daily_calorie_goal: 1700,
-    daily_protein_goal: 85,
-    daily_carbs_goal: 213,
-    daily_fat_goal: 57,
-    daily_water_goal_ml: 2000,
-  });
+export default function Settings() {
+  const { profile, goals, updateProfile, showToast } = useApp();
+  const theme = useTheme();
+  const [section, setSection] = useState(null);
+  const [form, setForm]   = useState({ dailyCalorieGoal: goals.calories, dailyProteinGoal: goals.protein, dailyCarbsGoal: goals.carbs, dailyFatGoal: goals.fat, dailyWaterGoalMl: goals.water });
+  const [calc, setCalc]   = useState({ weight: profile?.weightKg || '', height: profile?.heightCm || '', age: profile?.age || '', gender: profile?.gender || 'male', activity: 'moderate', goal: 'maintain' });
+  const [calcResult, setCalcResult] = useState(null);
+  const [notifPerm, setNotifPerm]   = useState(getPermissionStatus());
+  const [reminders, setReminders]   = useState(getReminders());
+  const [newRemHour, setNewRemHour] = useState('12');
+  const [newRemMin, setNewRemMin]   = useState('00');
+  const [newRemLabel, setNewRemLabel] = useState('');
 
-  useEffect(() => {
-    let mounted = true;
+  const toggle = (s) => setSection(section === s ? null : s);
+  const setF   = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const setC   = (k, v) => setCalc(p => ({ ...p, [k]: v }));
 
-    if (offline) {
-      try {
-        const dg = JSON.parse(localStorage.getItem('dailyGoals') || '{}');
-        const lp = offlineStore.getLocalProfile(userId) || {};
-        setProfile({
-          age: lp.age ?? '',
-          gender: lp.gender ?? 'male',
-          weight_kg: lp.weight_kg ?? '',
-          height_cm: lp.height_cm ?? '',
-          daily_calorie_goal: Number(dg.calories ?? lp.daily_calorie_goal ?? 1700),
-          daily_protein_goal: Number(dg.protein ?? lp.daily_protein_goal ?? 85),
-          daily_carbs_goal: Number(dg.carbs ?? lp.daily_carbs_goal ?? 213),
-          daily_fat_goal: Number(dg.fat ?? lp.daily_fat_goal ?? 57),
-          daily_water_goal_ml: Number(lp.daily_water_goal_ml ?? 2000),
-        });
-      } catch {
-        setError('Could not load local settings');
-      } finally {
-        setLoading(false);
-      }
-      return () => {
-        mounted = false;
-      };
-    }
-
-    const fetchProfile = async () => {
-      try {
-        const res = await apiFetch(`/users/${userId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!res.ok) throw new Error('Failed to load settings');
-        const data = await res.json();
-
-        if (!mounted) return;
-        setProfile({
-          age: data.age || '',
-          gender: data.gender || 'male',
-          weight_kg: data.weight_kg || '',
-          height_cm: data.height_cm || '',
-          daily_calorie_goal: Number(data.daily_calorie_goal || 1700),
-          daily_protein_goal: Number(data.daily_protein_goal || 85),
-          daily_carbs_goal: Number(data.daily_carbs_goal || 213),
-          daily_fat_goal: Number(data.daily_fat_goal || 57),
-          daily_water_goal_ml: Number(data.daily_water_goal_ml || 2000),
-        });
-      } catch (err) {
-        if (!mounted) return;
-        setError(err.message);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    fetchProfile();
-    return () => {
-      mounted = false;
-    };
-  }, [token, userId, offline]);
-
-  const updateField = (field, value) => {
-    setProfile((prev) => ({ ...prev, [field]: value }));
+  const saveGoals = async () => {
+    await updateProfile({ dailyCalorieGoal: +form.dailyCalorieGoal||2000, dailyProteinGoal: +form.dailyProteinGoal||120, dailyCarbsGoal: +form.dailyCarbsGoal||220, dailyFatGoal: +form.dailyFatGoal||65, dailyWaterGoalMl: +form.dailyWaterGoalMl||2500 });
+    showToast('Goals saved', '✅');
   };
 
-  const handleSubmit = async (e) => {
+  const calculate = (e) => {
     e.preventDefault();
-    setSaving(true);
-    setMessage('');
-    setError('');
+    const w = +calc.weight||70, h = +calc.height||175, a = +calc.age||25;
+    const bmr    = calc.gender === 'male' ? 10*w + 6.25*h - 5*a + 5 : 10*w + 6.25*h - 5*a - 161;
+    const mult   = ACTIVITIES.find(x => x.id === calc.activity)?.mult || 1.55;
+    const off    = GOAL_OFFSETS.find(x => x.id === calc.goal)?.offset || 0;
+    const tdee   = bmr * mult, target = tdee + off;
+    const protein = Math.round(w * 1.8), fat = Math.round((target*0.25)/9), carbs = Math.round((target - protein*4 - fat*9)/4);
+    setCalcResult({ bmr: Math.round(bmr), tdee: Math.round(tdee), target: Math.round(target), protein, carbs, fat });
+  };
 
-    const payload = {
-      age: profile.age ? Number(profile.age) : null,
-      gender: profile.gender || null,
-      weight_kg: profile.weight_kg ? Number(profile.weight_kg) : null,
-      height_cm: profile.height_cm ? Number(profile.height_cm) : null,
-      daily_calorie_goal: Number(profile.daily_calorie_goal || 1700),
-      daily_protein_goal: Number(profile.daily_protein_goal || 85),
-      daily_carbs_goal: Number(profile.daily_carbs_goal || 213),
-      daily_fat_goal: Number(profile.daily_fat_goal || 57),
-      daily_water_goal_ml: Number(profile.daily_water_goal_ml || 2000),
-    };
+  const applyCalc = async () => {
+    if (!calcResult) return;
+    await updateProfile({ weightKg: +calc.weight||70, heightCm: +calc.height||175, age: +calc.age||25, gender: calc.gender, dailyCalorieGoal: calcResult.target, dailyProteinGoal: calcResult.protein, dailyCarbsGoal: calcResult.carbs, dailyFatGoal: calcResult.fat });
+    setForm(p => ({ ...p, dailyCalorieGoal: calcResult.target, dailyProteinGoal: calcResult.protein, dailyCarbsGoal: calcResult.carbs, dailyFatGoal: calcResult.fat }));
+    showToast('Goals applied!', '✅');
+  };
 
-    try {
-      if (offline) {
-        const dailyGoals = {
-          calories: payload.daily_calorie_goal,
-          protein: payload.daily_protein_goal,
-          carbs: payload.daily_carbs_goal,
-          fat: payload.daily_fat_goal,
-        };
-        localStorage.setItem('dailyGoals', JSON.stringify(dailyGoals));
-        offlineStore.setLocalProfile(userId, {
-          ...offlineStore.getLocalProfile(userId),
-          age: payload.age,
-          gender: payload.gender,
-          weight_kg: payload.weight_kg,
-          height_cm: payload.height_cm,
-          daily_calorie_goal: payload.daily_calorie_goal,
-          daily_protein_goal: payload.daily_protein_goal,
-          daily_carbs_goal: payload.daily_carbs_goal,
-          daily_fat_goal: payload.daily_fat_goal,
-          daily_water_goal_ml: payload.daily_water_goal_ml,
-        });
-        localStorage.setItem(`water_goal_${userId}`, String(payload.daily_water_goal_ml));
-        setMessage('Saved on this device.');
-        return;
-      }
+  const changeTheme = async (id) => {
+    theme.setThemeId(id);
+    const r = await unlockAchievement('theme_changed');
+    if (r) showToast(`🎉 ${r.name}!`, r.icon);
+  };
 
-      const res = await apiFetch(`/users/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) throw new Error('Failed to save settings');
-
-      const dailyGoals = {
-        calories: payload.daily_calorie_goal,
-        protein: payload.daily_protein_goal,
-        carbs: payload.daily_carbs_goal,
-        fat: payload.daily_fat_goal,
-      };
-      localStorage.setItem('dailyGoals', JSON.stringify(dailyGoals));
-
-      setMessage('Settings updated successfully.');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
+  const enableNotifications = async () => {
+    const result = await requestPermission(); setNotifPerm(result);
+    if (result === 'granted') {
+      if (getReminders().length === 0) { for (const r of DEFAULT_REMINDERS) addReminder(r.label, r.hour, r.minute); setReminders(getReminders()); }
+      initNotifications(); showToast('Notifications enabled', '🔔');
     }
   };
 
-  const updatePasswordField = (field, value) => {
-    setPasswordForm((prev) => ({ ...prev, [field]: value }));
+  const clearData = async () => {
+    if (!window.confirm('Delete ALL data? This cannot be undone.')) return;
+    await db.delete(); localStorage.clear(); window.location.reload();
   };
 
-  const applyMotionPreset = (preset) => {
-    setMotionPreset(preset);
-    localStorage.setItem('motionPreset', preset);
-    const motionMap = { calm: 'calm', standard: 'standard', lively: 'lively' };
-    document.documentElement.setAttribute('data-motion', motionMap[preset] || 'standard');
-  };
+  const memberSince = profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'Recently';
 
-  const handlePasswordSubmit = async (e) => {
-    e.preventDefault();
-    setPasswordSaving(true);
-    setPasswordMessage('');
-    setPasswordError('');
-
-    if (passwordForm.new_password.length < 8) {
-      setPasswordSaving(false);
-      setPasswordError('New password must be at least 8 characters.');
-      return;
-    }
-
-    if (passwordForm.new_password !== passwordForm.confirm_password) {
-      setPasswordSaving(false);
-      setPasswordError('New password and confirm password do not match.');
-      return;
-    }
-
-    try {
-      const res = await apiFetch(`/users/${userId}/password`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          current_password: passwordForm.current_password,
-          new_password: passwordForm.new_password,
-        }),
-      });
-
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || 'Failed to update password');
-
-      setPasswordMessage('Password updated successfully.');
-      setPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
-    } catch (err) {
-      setPasswordError(err.message);
-    } finally {
-      setPasswordSaving(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="card settings-loading" role="status">
-        Loading settings…
-      </div>
-    );
-  }
+  const MENU = [
+    { id: 'goals',         icon: '🎯', label: 'Daily Goals',       desc: `${goals.calories} kcal · ${goals.protein}g Protein` },
+    { id: 'calculator',    icon: '🧮', label: 'TDEE Calculator',   desc: 'Calculate your ideal intake' },
+    { id: 'appearance',    icon: '🎨', label: 'Appearance',        desc: `${THEME_IDS.find(t => t.id === theme.themeId)?.label || 'Dark'} theme` },
+    { id: 'notifications', icon: '🔔', label: 'Notifications',     desc: notifPerm === 'granted' ? `${reminders.filter(r => r.enabled).length} active` : 'Tap to enable' },
+    { id: 'data',          icon: '🗃️', label: 'Data & Privacy',   desc: 'All data stored locally' },
+  ];
 
   return (
-    <div className="page-stack">
-      <div className="page-header">
-        <h1>Settings</h1>
-        <p>Account, nutrition targets, appearance, and security in one place.</p>
-      </div>
-
-      <div className="settings-page-stack">
-      <div className="card settings-hero-strip">
-        <div className="settings-hero-cell">
-          <span>Calorie target</span>
-          <strong>{Number(profile.daily_calorie_goal || 0).toLocaleString()} kcal</strong>
+    <div className="page page-enter">
+      {/* Profile card */}
+      <div className="profile-card">
+        <div className="profile-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </div>
-        <div className="settings-hero-cell">
-          <span>Protein</span>
-          <strong>{Number(profile.daily_protein_goal || 0).toFixed(0)} g / day</strong>
-        </div>
-        <div className="settings-hero-cell">
-          <span>Hydration</span>
-          <strong>{Number(profile.daily_water_goal_ml || 0).toLocaleString()} ml</strong>
-        </div>
-      </div>
-
-      <div className="card settings-account-card settings-section-card">
-        <h2>Account</h2>
-        <div className="settings-account-grid">
-          <div>
-            <label htmlFor="settings-username-ro">Username</label>
-            <p id="settings-username-ro">{user?.username || '—'}</p>
-          </div>
-          <div>
-            <label htmlFor="settings-email-ro">Email</label>
-            <p id="settings-email-ro">{user?.email || '—'}</p>
+        <div style={{ flex: 1 }}>
+          <div className="profile-name">{profile?.weightKg ? `${profile.weightKg} kg · ${profile.heightCm} cm` : '30 Calz User'}</div>
+          <div className="profile-meta">Member since {memberSince}</div>
+          <div className="profile-stats">
+            <div className="profile-stat"><div className="profile-stat-val">{goals.calories}</div><div className="profile-stat-label">Goal</div></div>
+            <div className="profile-stat"><div className="profile-stat-val">{goals.protein}g</div><div className="profile-stat-label">Protein</div></div>
+            <div className="profile-stat"><div className="profile-stat-val">{goals.carbs}g</div><div className="profile-stat-label">Carbs</div></div>
+            <div className="profile-stat"><div className="profile-stat-val">{goals.fat}g</div><div className="profile-stat-label">Fat</div></div>
           </div>
         </div>
       </div>
 
-      <form className="card settings-section-card" onSubmit={handleSubmit}>
-        <h2>Body & daily targets</h2>
-        <p className="settings-subcopy" style={{ marginTop: '-0.5rem' }}>
-          Used on your dashboard and for logging. Save when you are done editing.
-        </p>
-        <h3 className="settings-subheading">Profile</h3>
-        <div className="settings-grid">
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-age">Age</label>
-            <input id="set-age" type="number" value={profile.age} onChange={(e) => updateField('age', e.target.value)} />
+      {/* Menu */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+        {MENU.map(item => (
+          <div key={item.id}>
+            <button className={`settings-item${section === item.id ? ' open' : ''}`} style={{ display: 'flex', width: '100%', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer' }} onClick={() => toggle(item.id)}>
+              <div className="settings-item-icon">{item.icon}</div>
+              <div className="settings-item-body">
+                <div className="settings-item-label">{item.label}</div>
+                <div className="settings-item-desc">{item.desc}</div>
+              </div>
+              <div className={`settings-arrow${section === item.id ? ' open' : ''}`}>›</div>
+            </button>
+
+            {section === item.id && (
+              <div className="card page-enter" style={{ marginTop: 'var(--s-2)', marginBottom: 'var(--s-2)' }}>
+                {/* Goals */}
+                {item.id === 'goals' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+                    <div className="form-row">
+                      <div className="form-group"><label className="form-label">Calories</label><input className="input" type="number" value={form.dailyCalorieGoal} onChange={e => setF('dailyCalorieGoal', e.target.value)} /></div>
+                      <div className="form-group"><label className="form-label">Protein (g)</label><input className="input" type="number" value={form.dailyProteinGoal} onChange={e => setF('dailyProteinGoal', e.target.value)} /></div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group"><label className="form-label">Carbs (g)</label><input className="input" type="number" value={form.dailyCarbsGoal} onChange={e => setF('dailyCarbsGoal', e.target.value)} /></div>
+                      <div className="form-group"><label className="form-label">Fat (g)</label><input className="input" type="number" value={form.dailyFatGoal} onChange={e => setF('dailyFatGoal', e.target.value)} /></div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Water Goal (ml)</label>
+                      <input className="input" type="number" value={form.dailyWaterGoalMl} onChange={e => setF('dailyWaterGoalMl', e.target.value)} />
+                    </div>
+                    <button className="btn btn-primary btn-block" onClick={saveGoals}>Save Goals</button>
+                  </div>
+                )}
+
+                {/* TDEE Calculator */}
+                {item.id === 'calculator' && (
+                  <div>
+                    <form onSubmit={calculate} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+                      <div className="form-row">
+                        <div className="form-group"><label className="form-label">Weight (kg)</label><input className="input" type="number" step="0.1" value={calc.weight} onChange={e => setC('weight', e.target.value)} required /></div>
+                        <div className="form-group"><label className="form-label">Height (cm)</label><input className="input" type="number" value={calc.height} onChange={e => setC('height', e.target.value)} required /></div>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group"><label className="form-label">Age</label><input className="input" type="number" value={calc.age} onChange={e => setC('age', e.target.value)} required /></div>
+                        <div className="form-group"><label className="form-label">Gender</label><select className="input" value={calc.gender} onChange={e => setC('gender', e.target.value)}><option value="male">Male</option><option value="female">Female</option></select></div>
+                      </div>
+                      <div className="form-group"><label className="form-label">Activity Level</label><select className="input" value={calc.activity} onChange={e => setC('activity', e.target.value)}>{ACTIVITIES.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}</select></div>
+                      <div className="form-group"><label className="form-label">Goal</label><select className="input" value={calc.goal} onChange={e => setC('goal', e.target.value)}>{GOAL_OFFSETS.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}</select></div>
+                      <button className="btn btn-secondary btn-block" type="submit">Calculate</button>
+                    </form>
+                    {calcResult && (
+                      <div className="page-enter" style={{ marginTop: 'var(--s-4)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--s-3)', marginBottom: 'var(--s-4)' }}>
+                          {[
+                            { label: 'BMR',    val: calcResult.bmr,     unit: 'kcal' },
+                            { label: 'Target', val: calcResult.target,  unit: 'kcal' },
+                            { label: 'Protein',val: calcResult.protein, unit: 'g' },
+                            { label: 'Carbs',  val: calcResult.carbs,   unit: 'g' },
+                          ].map(s => (
+                            <div key={s.label} style={{ textAlign: 'center', padding: 'var(--s-4)', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }}>
+                              <div style={{ fontWeight: 900, fontSize: '1.4rem', fontFamily: 'var(--font-heading)', color: 'var(--accent-bright)' }}>{s.val}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--tx-3)', fontWeight: 600 }}>{s.label} ({s.unit})</div>
+                            </div>
+                          ))}
+                        </div>
+                        <button className="btn btn-primary btn-block" onClick={applyCalc}>Apply as My Goals</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Appearance */}
+                {item.id === 'appearance' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-5)' }}>
+                    <div>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--tx-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 'var(--s-3)' }}>Theme</div>
+                      <div className="theme-grid">
+                        {THEME_IDS.map(t => (
+                          <button key={t.id} className={`theme-card${theme.themeId === t.id ? ' active' : ''}`} onClick={() => changeTheme(t.id)}>
+                            <div className="theme-card-swatch" style={{ background: THEME_COLORS[t.id] ? `linear-gradient(135deg, ${THEME_COLORS[t.id][0]}, ${THEME_COLORS[t.id][1]})` : '#080810' }} />
+                            <div className="theme-card-name">{t.label}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--tx-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 'var(--s-3)' }}>Display</div>
+                      <div className="form-row">
+                        <div className="form-group"><label className="form-label">Corners</label><select className="input" value={theme.radius} onChange={e => theme.setRadius(e.target.value)}><option value="sharp">Sharp</option><option value="default">Default</option><option value="round">Round</option></select></div>
+                        <div className="form-group"><label className="form-label">Font Size</label><select className="input" value={theme.fontScale} onChange={e => theme.setFontScale(e.target.value)}><option value="sm">Small</option><option value="base">Default</option><option value="lg">Large</option></select></div>
+                      </div>
+                  </div>
+                )}
+
+                {/* Notifications */}
+                {item.id === 'notifications' && (
+                  <div>
+                    {notifPerm !== 'granted' ? (
+                      <div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--tx-2)', marginBottom: 'var(--s-4)', lineHeight: 1.5 }}>Get meal reminders to stay on track with your nutrition goals.</p>
+                        <button className="btn btn-primary btn-block" onClick={enableNotifications}>🔔 Enable Notifications</button>
+                        {notifPerm === 'denied' && <p style={{ fontSize: '0.72rem', color: 'var(--danger)', marginTop: 'var(--s-2)', textAlign: 'center' }}>Blocked — enable in browser settings</p>}
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="diary-meal-items" style={{ marginBottom: 'var(--s-4)' }}>
+                          {reminders.map(r => (
+                            <div key={r.id} className="diary-food-item">
+                              <div className="diary-food-info">
+                                <div className="diary-food-name">{r.label}</div>
+                                <div className="diary-food-macros">{String(r.hour).padStart(2,'0')}:{String(r.minute).padStart(2,'0')}</div>
+                              </div>
+                              <button className={`toggle${r.enabled ? ' on' : ''}`} onClick={() => setReminders(toggleReminder(r.id))} />
+                              <button className="diary-food-delete" style={{ opacity: 1 }} onClick={() => setReminders(removeReminder(r.id))}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: 'var(--s-2)', alignItems: 'flex-end' }}>
+                          <div className="form-group" style={{ flex: 1 }}><label className="form-label">Label</label><input className="input" placeholder="Lunch reminder" value={newRemLabel} onChange={e => setNewRemLabel(e.target.value)} /></div>
+                          <div className="form-group" style={{ width: 56 }}><label className="form-label">Hr</label><input className="input" type="number" min="0" max="23" value={newRemHour} onChange={e => setNewRemHour(e.target.value)} /></div>
+                          <div className="form-group" style={{ width: 56 }}><label className="form-label">Min</label><input className="input" type="number" min="0" max="59" value={newRemMin} onChange={e => setNewRemMin(e.target.value)} /></div>
+                          <button className="btn btn-primary btn-sm" onClick={() => { if (!newRemLabel.trim()) return; setReminders(addReminder(newRemLabel.trim(), parseInt(newRemHour), parseInt(newRemMin))); setNewRemLabel(''); }}>+</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Data & Privacy */}
+                {item.id === 'data' && (
+                  <div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--tx-2)', marginBottom: 'var(--s-2)', lineHeight: 1.5 }}>All data is stored locally in IndexedDB on your device. Nothing is sent to any server.</p>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--tx-3)', marginBottom: 'var(--s-5)' }}>30 Calz v4.0 · Offline-first PWA · Built for privacy</p>
+                    <button className="btn btn-danger btn-block" onClick={clearData}>🗑️ Delete All Data</button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-gender">Gender</label>
-            <select id="set-gender" value={profile.gender} onChange={(e) => updateField('gender', e.target.value)}>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-weight">Weight (kg)</label>
-            <input id="set-weight" type="number" step="0.1" value={profile.weight_kg} onChange={(e) => updateField('weight_kg', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-height">Height (cm)</label>
-            <input id="set-height" type="number" value={profile.height_cm} onChange={(e) => updateField('height_cm', e.target.value)} />
-          </div>
-        </div>
-
-        <h3 className="settings-subheading">Daily nutrition goals</h3>
-        <div className="settings-grid">
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-kcal">Calories</label>
-            <input id="set-kcal" type="number" value={profile.daily_calorie_goal} onChange={(e) => updateField('daily_calorie_goal', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-protein">Protein (g)</label>
-            <input id="set-protein" type="number" step="0.1" value={profile.daily_protein_goal} onChange={(e) => updateField('daily_protein_goal', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-carbs">Carbs (g)</label>
-            <input id="set-carbs" type="number" step="0.1" value={profile.daily_carbs_goal} onChange={(e) => updateField('daily_carbs_goal', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-fat">Fat (g)</label>
-            <input id="set-fat" type="number" step="0.1" value={profile.daily_fat_goal} onChange={(e) => updateField('daily_fat_goal', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="set-water">Water (ml)</label>
-            <input id="set-water" type="number" value={profile.daily_water_goal_ml} onChange={(e) => updateField('daily_water_goal_ml', e.target.value)} />
-          </div>
-        </div>
-
-        {message ? <div className="helper-note">{message}</div> : null}
-        {error ? <div className="inline-error">{error}</div> : null}
-
-        <div className="settings-form-footer">
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
-      </form>
-
-      {!offline && (
-      <form className="card settings-section-card" onSubmit={handlePasswordSubmit}>
-        <h2>Security</h2>
-        <div className="settings-grid">
-          <div className="form-group">
-            <label className="form-label" htmlFor="pw-current">Current password</label>
-            <input
-              id="pw-current"
-              type="password"
-              value={passwordForm.current_password}
-              onChange={(e) => updatePasswordField('current_password', e.target.value)}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="pw-new">New password</label>
-            <input
-              id="pw-new"
-              type="password"
-              value={passwordForm.new_password}
-              onChange={(e) => updatePasswordField('new_password', e.target.value)}
-              minLength={8}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="pw-confirm">Confirm new password</label>
-            <input
-              id="pw-confirm"
-              type="password"
-              value={passwordForm.confirm_password}
-              onChange={(e) => updatePasswordField('confirm_password', e.target.value)}
-              minLength={8}
-              required
-            />
-          </div>
-        </div>
-
-        {passwordMessage ? <div className="helper-note">{passwordMessage}</div> : null}
-        {passwordError ? <div className="inline-error">{passwordError}</div> : null}
-
-        <div className="settings-form-footer">
-          <button type="submit" className="btn btn-primary" disabled={passwordSaving}>
-            {passwordSaving ? 'Updating…' : 'Update password'}
-          </button>
-        </div>
-      </form>
-      )}
-
-      <div className="card settings-section-card">
-  <h2>Theme & display</h2>
-  <p className="settings-subcopy">Choose a color palette, accent, and layout density. Changes apply instantly.</p>
-
-  <h3 className="settings-subheading">Color palette</h3>
-  <div className="theme-preset-grid" role="list">
-    {THEME_IDS.map(t => (
-      <button
-        key={t.id}
-        type="button"
-        role="listitem"
-        className={`theme-preset-btn ${themeId === t.id ? 'active' : ''}`}
-        onClick={() => setThemeId(t.id)}
-      >
-        <strong>{t.label}</strong>
-        <span>{t.hint}</span>
-      </button>
-    ))}
-  </div>
-
-  <h3 className="settings-subheading">Accent hue</h3>
-  <div className="accent-preset-row" role="group" aria-label="Accent presets">
-    {[
-      { hue: 168, label: 'Teal (default)' },
-      { hue: 200, label: 'Blue' },
-      { hue: 250, label: 'Violet' },
-      { hue: 135, label: 'Green' },
-      { hue: 22,  label: 'Amber' },
-      { hue: 340, label: 'Rose' },
-    ].map(p => (
-      <button
-        key={p.hue}
-        type="button"
-        className={`accent-preset-btn ${accentHue === p.hue ? 'active' : ''}`}
-        style={{ background: `hsl(${p.hue} 72% 50%)` }}
-        title={p.label}
-        aria-label={p.label}
-        onClick={() => setAccentHue(p.hue)}
-      />
-    ))}
-  </div>
-  <div className="theme-accent-row">
-    <label className="form-label" htmlFor="accent-hue-range">
-      Fine-tune ({accentHue}°)
-    </label>
-    <input
-      id="accent-hue-range"
-      type="range"
-      min="0"
-      max="360"
-      value={accentHue}
-      onChange={e => setAccentHue(Number(e.target.value))}
-    />
-  </div>
-
-  <h3 className="settings-subheading">Text size</h3>
-  <div className="theme-ui-row" role="group" aria-label="Text size">
-    {[
-      { id: 'sm',   label: 'Small' },
-      { id: 'base', label: 'Default' },
-      { id: 'lg',   label: 'Large' },
-    ].map(f => (
-      <button
-        key={f.id}
-        type="button"
-        className={`theme-chip ${fontScale === f.id ? 'active' : ''}`}
-        onClick={() => setFontScale(f.id)}
-      >
-        {f.label}
-      </button>
-    ))}
-  </div>
-
-  <h3 className="settings-subheading">Corner style</h3>
-  <div className="theme-ui-row" role="group" aria-label="Corner radius">
-    {[
-      { id: 'sharp',   label: 'Sharp' },
-      { id: 'default', label: 'Balanced' },
-      { id: 'round',   label: 'Rounded' },
-    ].map(r => (
-      <button
-        key={r.id}
-        type="button"
-        className={`theme-chip ${radius === r.id ? 'active' : ''}`}
-        onClick={() => setRadius(r.id)}
-      >
-        {r.label}
-      </button>
-    ))}
-  </div>
-
-  <h3 className="settings-subheading">Layout density</h3>
-  <div className="theme-ui-row" role="group" aria-label="Density">
-    {[
-      { id: 'compact',     label: 'Compact' },
-      { id: 'comfortable', label: 'Comfortable' },
-      { id: 'spacious',    label: 'Spacious' },
-    ].map(d => (
-      <button
-        key={d.id}
-        type="button"
-        className={`theme-chip ${density === d.id ? 'active' : ''}`}
-        onClick={() => setDensity(d.id)}
-      >
-        {d.label}
-      </button>
-    ))}
-  </div>
-
-  <h3 className="settings-subheading">Motion</h3>
-  <div className="motion-preset-group" role="group" aria-label="Animation speed">
-    {[
-      { value: 'calm',     label: 'Calm',    hint: 'Minimal transitions' },
-      { value: 'standard', label: 'Standard',hint: 'Balanced feel' },
-      { value: 'lively',   label: 'Lively',  hint: 'More expressive' },
-    ].map(p => (
-      <button
-        key={p.value}
-        type="button"
-        className={`motion-preset-chip ${motionPreset === p.value ? 'active' : ''}`}
-        onClick={() => applyMotionPreset(p.value)}
-      >
-        <strong>{p.label}</strong>
-        <span>{p.hint}</span>
-      </button>
-    ))}
-  </div>
-</div>
+        ))}
       </div>
     </div>
   );

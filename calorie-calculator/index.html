@@ -1,15 +1,40 @@
 <!doctype html>
 <html lang="en" data-theme="dark" data-radius="default" data-density="comfortable">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>30 Cal — Nutrition &amp; calorie tracker</title>
-    <meta name="description" content="30 Cal: track calories, macros, water, and workouts — works offline as a PWA." />
-    <meta name="theme-color" content="#0B1220" />
-    <link rel="icon" type="image/svg+xml" href="/pwa-icon.svg" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content, maximum-scale=1" />
+  <title>30 Calz — Premium Nutrition Tracker</title>
+  <meta name="description"
+    content="30 Calz: track calories, macros, water, fasting, and workouts. Works 100% offline. Premium UI for Android." />
+  <meta name="theme-color" content="#0a0c0e" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="icon" type="image/svg+xml" href="/pwa-icon.svg" />
+  <style>
+    body { margin: 0; background: #0a0c0e; }
+    #root:empty {
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    }
+    #root:empty::after {
+      content: '30 Calz';
+      font-weight: 800; font-size: 1.8rem;
+      background: linear-gradient(125deg, #2dd4a8, #14b8a6, #06b6d4);
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+
 </html>

@@ -1,24 +1,20 @@
 /* eslint-env node */
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const backendTarget = env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:5002';
-
-  return {
-    plugins: [
+export default defineConfig({
+  plugins: [
     react({ jsxRuntime: 'automatic' }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['pwa-icon.svg'],
       manifest: {
-        name: '30 Cal',
-        short_name: '30 Cal',
-        description: 'Nutrition and calorie tracking — works offline.',
-        theme_color: '#0B1220',
-        background_color: '#0B1220',
+        name: 'CalorieLab',
+        short_name: 'CalorieLab',
+        description: 'Premium offline-first nutrition tracker',
+        theme_color: '#0a0c0e',
+        background_color: '#0a0c0e',
         display: 'standalone',
         orientation: 'portrait-primary',
         scope: '/',
@@ -33,19 +29,36 @@ export default defineConfig(({ mode }) => {
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,svg,woff2,json}'],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com/,
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'google-fonts-stylesheets' },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'google-fonts-webfonts', expiration: { maxEntries: 20, maxAgeSeconds: 365 * 24 * 60 * 60 } },
+          },
+        ],
       },
     }),
-    ],
-    server: {
-      port: 3000,
-      strictPort: false,
-      proxy: {
-        '/api': {
-          target: backendTarget,
-          changeOrigin: true,
+  ],
+  server: {
+    port: 3000,
+    strictPort: false,
+    host: true,
+  },
+  build: {
+    target: 'es2020',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          db: ['dexie'],
         },
       },
     },
-  };
+  },
 });
